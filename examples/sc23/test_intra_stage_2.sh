@@ -1,6 +1,5 @@
 #! /bin/bash
 
-# 1.3B model
 GLOBAL_BATCH_SIZE=512
 NUM_MICRO_BATCH=64
 

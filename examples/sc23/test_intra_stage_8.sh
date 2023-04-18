@@ -1,18 +1,17 @@
 #! /bin/bash
 
-# 1.3B model
 GLOBAL_BATCH_SIZE=512
 NUM_MICRO_BATCH=64
 
-NUM_LAYERS=4
+NUM_LAYERS=8
 HIDDEN_SIZE=4096
 NUM_HEADS=32
-RESULT_DIR="intra_stage_result_4"
+RESULT_DIR="intra_stage_result_8"
 MASTER_ADDR="nico1"
 
 LOCAL_BATCH_SIZE=$(expr $GLOBAL_BATCH_SIZE / $NUM_MICRO_BATCH)
 
-num=4
+num=8
 
 if [ ! -d $RESULT_DIR ]; then
   mkdir $RESULT_DIR
