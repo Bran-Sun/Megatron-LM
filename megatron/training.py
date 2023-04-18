@@ -91,6 +91,11 @@ def pretrain(train_valid_test_dataset_provider,
     # Set pytorch JIT layer fusion options and warmup JIT functions.
     set_jit_fusion_options()
 
+    # if A100
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.allow_tf32 = True
+
     # Adjust the startup time so it reflects the largest value.
     # This will be closer to what scheduler will see (outside of
     # image ... launches.
@@ -364,6 +369,9 @@ def setup_model_and_optimizer(model_provider_func,
     args = get_args()
 
     model = get_model(model_provider_func, model_type)
+    #for x in model[0].parameters():
+    #    print_rank_0(f"{x.shape}")
+    #print_rank_0(f"parameters: {sum(x.numel() for x in model[0].parameters())}")
     unwrapped_model = unwrap_model(model,
                                    (torchDDP, LocalDDP, Float16Module))
 

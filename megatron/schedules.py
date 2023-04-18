@@ -14,6 +14,7 @@ from megatron.utils import unwrap_model
 from megatron.model import DistributedDataParallel as LocalDDP
 from megatron.model import Float16Module
 from megatron.model import ModelType
+import time
 
 
 def get_forward_backward_func():
@@ -52,7 +53,7 @@ def deallocate_output_tensor(out):
         device = out.device,
         dtype = out.dtype,
     )
-        
+
 def custom_backward(output, grad_output):
     '''Directly call C++ autograd engine.
 
@@ -87,7 +88,7 @@ def custom_backward(output, grad_output):
         allow_unreachable=True,
         accumulate_grad=True,
     )
-        
+
 
 def forward_step(forward_step_func,
                  data_iterator,
@@ -255,7 +256,7 @@ def forward_backward_pipelining_with_interleaving(forward_step_func,
                                                   data_iterator, model,
                                                   optimizer,
                                                   timers,
-                                                  forward_only, 
+                                                  forward_only,
                                                   collect_non_loss_data=False):
     """Run interleaved 1F1B schedule (model split into model chunks), with
     communication between pipeline stages as needed.
@@ -278,7 +279,7 @@ def forward_backward_pipelining_with_interleaving(forward_step_func,
     else:
         seq_length = args.seq_length
     tensor_shape = (seq_length, args.micro_batch_size, args.hidden_size)
-    
+
     # Compute number of warmup and remaining microbatches.
     num_model_chunks = len(model)
     num_microbatches = get_num_microbatches() * num_model_chunks
@@ -329,7 +330,7 @@ def forward_backward_pipelining_with_interleaving(forward_step_func,
         output_tensor = forward_step(forward_step_func,
                                      data_iterator[model_chunk_id],
                                      model[model_chunk_id],
-                                     input_tensor, 
+                                     input_tensor,
                                      forward_data_store,
                                      timers,
                                      collect_non_loss_data)
@@ -616,7 +617,7 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
 
     Returns dictionary with losses if the last stage, empty dict otherwise."""
     args = get_args()
-    
+
     assert len(model) == 1
     model = model[0]
 
@@ -646,13 +647,23 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
         output_tensors = []
     forward_data_store = []
 
+    timers = get_timers()
+
     # Run warmup forward passes.
     for i in range(num_warmup_microbatches):
+        timers('recv_forward', log_level=2).start()
         input_tensor = recv_forward(recv_tensor_shapes, timers=timers)
+        timers('recv_forward').stop()
+
+        timers('micro_forward', log_level=2).start()
         output_tensor = forward_step(forward_step_func, data_iterator, model,
                                      input_tensor, forward_data_store,
                                      timers, collect_non_loss_data)
+        timers('micro_forward').stop()
+
+        timers('send_forward', log_level=2).start()
         send_forward(output_tensor, send_tensor_shapes, timers=timers)
+        timers('send_forward').stop()
 
         if not forward_only:
             input_tensors.append(input_tensor)
@@ -663,15 +674,20 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
     # If all microbatches are run in warmup / cooldown phase, then no need to
     # receive this tensor here.
     if num_microbatches_remaining > 0:
+        timers('recv_forward', log_level=2).start()
         input_tensor = recv_forward(recv_tensor_shapes, timers=timers)
+        timers('recv_forward').stop()
 
     # Run 1F1B in steady state.
     for i in range(num_microbatches_remaining):
         last_iteration = (i == (num_microbatches_remaining - 1))
 
+        timers('micro_forward', log_level=2).start()
         output_tensor = forward_step(forward_step_func, data_iterator, model,
                                      input_tensor, forward_data_store,
                                      timers, collect_non_loss_data)
+        timers('micro_forward').stop()
+
         if forward_only:
             send_forward(output_tensor, send_tensor_shapes, timers=timers)
 
@@ -679,10 +695,12 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
                 input_tensor = recv_forward(recv_tensor_shapes, timers=timers)
 
         else:
+            timers('send_forward', log_level=2).start()
             output_tensor_grad = \
                 send_forward_recv_backward(output_tensor,
                                            send_tensor_shapes,
                                            timers=timers)
+            timers('send_forward').stop()
 
             # Add input_tensor and output_tensor to end of list.
             input_tensors.append(input_tensor)
@@ -694,10 +712,13 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
             input_tensor = input_tensors.pop(0)
             output_tensor = output_tensors.pop(0)
 
+            timers('micro_backward', log_level=2).start()
             input_tensor_grad = \
                 backward_step(optimizer, input_tensor, output_tensor,
                               output_tensor_grad, timers)
+            timers('micro_backward', log_level=2).stop()
 
+            timers('recv_forward', log_level=2).start()
             if last_iteration:
                 input_tensor = None
                 send_backward(input_tensor_grad, recv_tensor_shapes, timers=timers)
@@ -705,6 +726,7 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
                 input_tensor = \
                     send_backward_recv_forward(
                         input_tensor_grad, recv_tensor_shapes, timers=timers)
+            timers('recv_forward').stop()
 
     # Run cooldown backward passes.
     if not forward_only:
@@ -712,12 +734,23 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
             input_tensor = input_tensors.pop(0)
             output_tensor = output_tensors.pop(0)
 
+            timers('send_forward', log_level=2).start()
             output_tensor_grad = recv_backward(send_tensor_shapes, timers=timers)
+            timers('send_forward').stop()
 
+            timers('micro_backward', log_level=2).start()
             input_tensor_grad = \
                 backward_step(optimizer, input_tensor, output_tensor,
                               output_tensor_grad, timers)
+            timers('micro_backward').stop()
 
+            timers('recv_forward', log_level=2).start()
             send_backward(input_tensor_grad, recv_tensor_shapes, timers=timers)
-
+            timers('recv_forward').stop()
+    log_label = [
+        'recv_forward',
+        'micro_forward',
+        'send_forward',
+        'micro_backward']
+    timers.log(log_label, normalizer=1.0/num_microbatches)
     return forward_data_store

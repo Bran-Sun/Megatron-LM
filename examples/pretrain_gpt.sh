@@ -1,31 +1,37 @@
 #! /bin/bash
 
-# Runs the "345M" parameter model
+# PLEASE input TP, PP, DP, LOCAL_BATCH_SIZE, NUM_LAYERS, HIDDEN_SIZE, NUM_HEADS
 
-RANK=0
-WORLD_SIZE=1
+DATA_PATH=/home/sunzhenbo/dataset/dataset/my-bert_text_sentence
 
-DATA_PATH=<Specify path and file prefix>_text_document
-CHECKPOINT_PATH=<Specify path>
+export MASTER_ADDR=nico1
+export MASTER_PORT=6000
 
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export GPUS_PER_NODE=8
+export RANK=$SLURM_PROCID
+export LOCAL_RANK=$(expr $RANK % $GPUS_PER_NODE)
+export WORLD_SIZE=$SLURM_NTASKS
 
 python pretrain_gpt.py \
-       --num-layers 24 \
-       --hidden-size 1024 \
-       --num-attention-heads 16 \
-       --micro-batch-size 4 \
-       --global-batch-size 8 \
+       --tensor-model-parallel-size $TP \
+       --pipeline-model-parallel-size $PP \
+       --timing-log-level 2 \
+       --timing-log-option all \
+       --num-layers $NUM_LAYERS \
+       --hidden-size $HIDDEN_SIZE  \
+       --num-attention-heads $NUM_HEADS \
+       --micro-batch-size $MICRO_BATCH_SIZE \
+       --global-batch-size $GLOBAL_BATCH_SIZE \
        --seq-length 1024 \
        --max-position-embeddings 1024 \
-       --train-iters 500000 \
+       --train-iters 20 \
        --lr-decay-iters 320000 \
-       --save $CHECKPOINT_PATH \
-       --load $CHECKPOINT_PATH \
        --data-path $DATA_PATH \
        --vocab-file gpt2-vocab.json \
        --merge-file gpt2-merges.txt \
        --data-impl mmap \
-       --split 949,50,1 \
+       --split 94,5,1 \
        --distributed-backend nccl \
        --lr 0.00015 \
        --min-lr 1.0e-5 \
@@ -33,9 +39,8 @@ python pretrain_gpt.py \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction .01 \
-       --activations-checkpoint-method uniform \
-       --log-interval 100 \
+       --log-interval 4 \
        --save-interval 10000 \
        --eval-interval 1000 \
-       --eval-iters 10 \
-       --fp16
+       --eval-iters 0 \
+       --make-vocab-size-divisible-by 51200
