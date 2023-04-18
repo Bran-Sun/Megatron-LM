@@ -4,7 +4,7 @@
 
 DATA_PATH=/home/sunzhenbo/dataset/dataset/my-bert_text_sentence
 
-export MASTER_ADDR=nico1
+export MASTER_ADDR=$MASTER_ADDR
 export MASTER_PORT=6000
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
