@@ -1,18 +1,18 @@
 #! /bin/bash
 
-# 1.3B model
+# 2.6B model
 GLOBAL_BATCH_SIZE=512
 NUM_MICRO_BATCH=64
 
-NUM_LAYERS=24
-HIDDEN_SIZE=2048
+NUM_LAYERS=32
+HIDDEN_SIZE=2560
 NUM_HEADS=32
-RESULT_DIR="end_to_end_result_8"
+RESULT_DIR="end_to_end_result_16"
 MASTER_ADDR="nico1"
 
 LOCAL_BATCH_SIZE=$(expr $GLOBAL_BATCH_SIZE / $NUM_MICRO_BATCH)
 
-num=8
+num=16
 
 if [ ! -d $RESULT_DIR ]; then
   mkdir $RESULT_DIR
@@ -33,7 +33,7 @@ do
         GLOBAL_BATCH_SIZE=$GLOBAL_BATCH_SIZE MICRO_BATCH_SIZE=$MICRO_BATCH_SIZE \
         NUM_LAYERS=$NUM_LAYERS HIDDEN_SIZE=$HIDDEN_SIZE NUM_HEADS=$NUM_HEADS \
         MASTER_ADDR=$MASTER_ADDR \
-        srun -n $num -p Big -K -w nico1 sh examples/pretrain_gpt.sh | tee ${RESULT_DIR}/gpt_${TP}_${DP}_${PP}.txt
+        srun -n 16 --ntasks-per-node 8 -p Big -K -w nico1,nico2 sh examples/pretrain_gpt.sh | tee ${RESULT_DIR}/gpt_${TP}_${DP}_${PP}.txt
 
         # openmpi
         # mpirun --allow-run-as-root -x TP=$TP -x DP=$PP \
